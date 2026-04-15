@@ -23,7 +23,7 @@ local Window = Rayfield:CreateWindow({
         FileName = "BUBScripts_Key",
         SaveKey = false,
         GrabKeyFromSite = true,
-        Key = "https://pastebin.com/raw/XRXMWaxW"
+        Key = "https://pastebin.com/raw/8dPafPL1"
     }
 })
 
@@ -35,135 +35,141 @@ local RunService = game:GetService("RunService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
+-- Seat Spammer Constants
 local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
 local RANDOM_RADIUS = 500
 local MAX_DISTANCE = 3000
 local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
 
-local isSpamming = false
-local seatLoopThread = nil   -- New: using a thread instead of Heartbeat
+-- Seat Spammer Variables
+local SEAT_ATTEMPT_RATE = 3
+local lastAttemptTime = 0
+local seatCache = {}
+local attemptConnection = nil
 
--- Numpad Cycle
+-- Other Variables
+local isSpamming = false
 local autoCycleEnabled = false
 local tapsPerSecond = 10
 local selectedKeys = {"KeypadOne","KeypadTwo","KeypadThree","KeypadFour","KeypadFive",
                       "KeypadSix","KeypadSeven","KeypadEight","KeypadNine","KeypadZero"}
 local currentIndex = 1
 
--- Anti Ragdoll
 local antiRagdollEnabled = false
 local unRagdollRemote = game:GetService("ReplicatedStorage").Events.unRagdoll
 
--- Auto Clicker
 local autoClickerEnabled = false
 local clicksPerSecond = 12
 
--- ==================== SEAT SPAMMER ====================
-local SEAT_ATTEMPT_RATE = 3
+-- ==================== OPTIMIZED SEAT SPAMMER ====================
 
-local function getRandomPositionAround(center, radius)
-	local angle = math.random() * math.pi * 2
-	local distance = math.random() * radius
-	local offsetX = math.cos(angle) * distance
-	local offsetZ = math.sin(angle) * distance
-	local offsetY = math.random(-25, 25)
-	return center + Vector3.new(offsetX, offsetY, offsetZ)
+local function refreshSeatCache()
+    seatCache = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+            table.insert(seatCache, obj)
+        end
+    end
 end
 
-local function getNearestSeat()
-	local closestSeat = nil
-	local shortestDistance = math.huge
-	local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then return nil end
+-- Keep cache updated automatically
+workspace.DescendantAdded:Connect(function(obj)
+    if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+        table.insert(seatCache, obj)
+    end
+end)
 
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if (obj:IsA("VehicleSeat") or obj:IsA("Seat")) and not obj.Occupant then
-			local distance = (obj.Position - rootPart.Position).Magnitude
-			if distance < shortestDistance and distance <= MAX_DISTANCE then
-				shortestDistance = distance
-				closestSeat = obj
-			end
-		end
-	end
-	return closestSeat
+workspace.DescendantRemoving:Connect(function(obj)
+    if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+        for i = #seatCache, 1, -1 do
+            if seatCache[i] == obj then
+                table.remove(seatCache, i)
+                break
+            end
+        end
+    end
+end)
+
+local function getNearestSeat()
+    local closestSeat = nil
+    local shortestDistance = math.huge
+    local myPos = rootPart.Position
+
+    for _, seat in ipairs(seatCache) do
+        if seat and seat.Parent and not seat.Occupant then
+            local distance = (seat.Position - myPos).Magnitude
+            if distance < shortestDistance and distance <= MAX_DISTANCE then
+                shortestDistance = distance
+                closestSeat = seat
+            end
+        end
+    end
+    return closestSeat
 end
 
 local function teleportToSeat(seat)
-	if not seat or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-	local rootPart = player.Character.HumanoidRootPart
-	rootPart.CFrame = seat.CFrame * TELEPORT_OFFSET
-	task.wait(0.03)
-	local humanoid = player.Character:FindFirstChild("Humanoid")
-	if humanoid and seat and not seat.Occupant then
-		seat:Sit(humanoid)
-	end
+    if not seat or not rootPart then return end
+    rootPart.CFrame = seat.CFrame * TELEPORT_OFFSET
+    task.wait(0.03)
+    if humanoid and seat and not seat.Occupant then
+        seat:Sit(humanoid)
+    end
+end
+
+local function getRandomPositionAround(center, radius)
+    local angle = math.random() * math.pi * 2
+    local distance = math.random() * radius
+    local offsetX = math.cos(angle) * distance
+    local offsetZ = math.sin(angle) * distance
+    local offsetY = math.random(-25, 25)
+    return center + Vector3.new(offsetX, offsetY, offsetZ)
 end
 
 local function resetPosition()
-	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-	local rootPart = player.Character.HumanoidRootPart
-	local randomPos = getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS)
-	rootPart.CFrame = CFrame.new(randomPos)
-end
-
-local function seatSpamLoop()
-	while isSpamming do
-		local nearest = getNearestSeat()
-		if nearest then
-			teleportToSeat(nearest)
-		end
-		resetPosition()
-
-		task.wait(1 / SEAT_ATTEMPT_RATE)
-	end
+    if rootPart then
+        local randomPos = getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS)
+        rootPart.CFrame = CFrame.new(randomPos)
+    end
 end
 
 local function startSeatLoop()
-	if seatLoopThread then return end
-	isSpamming = true
-	seatLoopThread = task.spawn(seatSpamLoop)
+    if attemptConnection then return end
+    
+    refreshSeatCache()  -- Build cache when enabling
+    
+    attemptConnection = RunService.Heartbeat:Connect(function()
+        local currentTime = tick()
+        if currentTime - lastAttemptTime >= (1 / SEAT_ATTEMPT_RATE) then
+            lastAttemptTime = currentTime
+            
+            local nearest = getNearestSeat()
+            if nearest then
+                teleportToSeat(nearest)
+            end
+            resetPosition()
+        end
+    end)
 end
 
 local function stopSeatLoop()
-	isSpamming = false
-	if seatLoopThread then
-		-- The loop will exit naturally on next iteration
-		seatLoopThread = nil
-	end
+    if attemptConnection then
+        attemptConnection:Disconnect()
+        attemptConnection = nil
+    end
+    lastAttemptTime = 0
 end
-
--- ==================== CHARACTER / DEATH HANDLING ====================
-local function setupCharacter(character)
-	local humanoid = character:WaitForChild("Humanoid")
-	
-	humanoid.Died:Connect(function()
-		task.wait(2)
-		
-		if isSpamming then
-			local newChar = player.Character or player.CharacterAdded:Wait()
-			setupCharacter(newChar)
-			
-			stopSeatLoop()
-			task.wait(0.5)
-			startSeatLoop()
-			
-			Rayfield:Notify({Title = "Auto Counter", Content = "Respawned - Auto Counter Restarted", Duration = 4})
-		end
-	end)
-end
-
-if player.Character then
-	setupCharacter(player.Character)
-end
-player.CharacterAdded:Connect(setupCharacter)
 
 -- ==================== UI ====================
 MainTab:CreateToggle({
     Name = "Auto Car Counter",
     CurrentValue = false,
     Callback = function(Value)
-        if Value then
+        isSpamming = Value
+        if isSpamming then
             startSeatLoop()
             Rayfield:Notify({Title = "Auto Counter", Content = "ENABLED", Duration = 4})
         else
@@ -175,7 +181,7 @@ MainTab:CreateToggle({
 
 MainTab:CreateSlider({
     Name = "Auto Counter Speed (Attempts/sec)",
-    Range = {1, 60},
+    Range = {1, 10},
     Increment = 1,
     CurrentValue = 3,
     Callback = function(Value)
@@ -230,21 +236,21 @@ MainTab:CreateSlider({
     end,
 })
 
--- ==================== NUMPAD CYCLE & AUTO CLICKER (unchanged) ====================
+-- ==================== NUMPAD CYCLE ====================
 task.spawn(function()
     while true do
         if autoCycleEnabled then
-            local vim = game:GetService("VirtualInputManager")
+            local vim = VirtualInputManager
             local keyName = selectedKeys[currentIndex]
             local keyCode = Enum.KeyCode[keyName]
-            
+           
             vim:SendKeyEvent(true, keyCode, false, game)
             task.wait(0.001)
             vim:SendKeyEvent(false, keyCode, false, game)
-            
+           
             currentIndex = currentIndex + 1
             if currentIndex > #selectedKeys then currentIndex = 1 end
-            
+           
             task.wait(1 / tapsPerSecond)
         else
             task.wait(0.1)
@@ -252,13 +258,14 @@ task.spawn(function()
     end
 end)
 
+-- ==================== AUTO CLICKER ====================
 task.spawn(function()
     while true do
         if autoClickerEnabled then
             VirtualInputManager:SendMouseButtonEvent(160, 0, 0, true, game, 0)
             task.wait(0.001)
             VirtualInputManager:SendMouseButtonEvent(160, 0, 0, false, game, 0)
-            
+           
             task.wait(1 / clicksPerSecond)
         else
             task.wait(0.1)
@@ -268,17 +275,14 @@ end)
 
 -- ==================== ANTI RAGDOLL ====================
 RunService.Heartbeat:Connect(function()
-    if antiRagdollEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then
-        local hum = player.Character.Humanoid
-        if hum.PlatformStand then
-            unRagdollRemote:FireServer()
-        end
+    if antiRagdollEnabled and humanoid and humanoid.PlatformStand then
+        unRagdollRemote:FireServer()
     end
 end)
 
 Rayfield:Notify({
     Title = "BUB_Scripts Loaded",
-    Content = "Seat spammer optimized - should lag much less",
+    Content = "Join Our Discord",
     Duration = 5,
 })
 
