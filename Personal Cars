@@ -4,7 +4,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
     Name = "😎 BUB_Scripts",
     LoadingTitle = "BUB_Scripts",
-    LoadingSubtitle = "AutoCounter + Seat Lock + LoopBringC (IY Style) + Anti-Exploiter",
+    LoadingSubtitle = "AutoCounter + Seat Lock + Anti-Ragdoll",
     Theme = "Default",
     ToggleUIKeybind = "K",
     DisableRayfieldPrompts = true,
@@ -27,14 +27,327 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("Main", 4483362458)
-local LoopBringTab = Window:CreateTab("LoopBringC", 4483362458)
-local AntiTab = Window:CreateTab("Anti-Exploiter", 4483362458)
 
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
+local player = Players.LocalPlayer
+local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
+local RANDOM_RADIUS = 500
+local MAX_DISTANCE = 3000
+local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
+
+local isSpamming = false
+local seatConnection = nil
+local currentOwner = nil        -- Who owns the seat/vehicle
+
+-- ==================== SEAT CACHE ====================
+local seatCache = {}
+
+local function refreshSeatCache()
+    seatCache = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+            table.insert(seatCache, obj)
+        end
+    end
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+    if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+        table.insert(seatCache, obj)
+    end
+end)
+
+workspace.DescendantRemoving:Connect(function(obj)
+    for i = #seatCache, 1, -1 do
+        if seatCache[i] == obj then
+            table.remove(seatCache, i)
+            break
+        end
+    end
+end)
+
+-- ==================== HELPER FUNCTIONS ====================
+local function isProperlySeated()
+    local character = player.Character
+    if not character then return false end
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    return humanoid.SeatPart and humanoid.SeatPart.Occupant == humanoid
+end
+
+local function getNearestSeat()
+    local closestSeat = nil
+    local shortestDistance = math.huge
+    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+
+    for _, seat in ipairs(seatCache) do
+        if seat and seat.Parent and not seat.Occupant then
+            local distance = (seat.Position - rootPart.Position).Magnitude
+            if distance < shortestDistance and distance <= MAX_DISTANCE then
+                shortestDistance = distance
+                closestSeat = seat
+            end
+        end
+    end
+    return closestSeat
+end
+
+local function teleportToSeat(seat)
+    if not seat then return end
+    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    rootPart.CFrame = seat.CFrame * TELEPORT_OFFSET
+    task.wait(0.03)
+
+    local humanoid = player.Character:FindFirstChild("Humanoid")
+    if humanoid and not seat.Occupant then
+        seat:Sit(humanoid)
+    end
+end
+
+local function ejectOccupant(seat)
+    if seat and seat.Occupant then
+        local hum = seat.Occupant
+        hum.Jump = true
+        task.wait(0.15)
+        hum.Jump = false
+    end
+end
+
+local function checkSeatOwnership(seat)
+    if not seat or not seat.Occupant then return end
+
+    local occupantHum = seat.Occupant
+    local occupantPlayer = Players:GetPlayerFromCharacter(occupantHum.Parent)
+
+    if occupantPlayer then
+        -- First time sitting = become owner
+        if not currentOwner and occupantPlayer == player then
+            currentOwner = player
+            Rayfield:Notify({Title = "Seat Locked", Content = "You are now the owner", Duration = 3})
+        end
+
+        -- Someone else is in your seat → auto eject
+        if occupantPlayer ~= player and currentOwner == player then
+            Rayfield:Notify({
+                Title = "Seat Protected",
+                Content = occupantPlayer.Name .. " was auto-ejected",
+                Duration = 2.5
+            })
+            ejectOccupant(seat)
+        end
+    end
+end
+
+local function getRandomPositionAround(center, radius)
+    local angle = math.random() * math.pi * 2
+    local distance = math.random() * radius
+    local offsetX = math.cos(angle) * distance
+    local offsetZ = math.sin(angle) * distance
+    local offsetY = math.random(-25, 25)
+    return center + Vector3.new(offsetX, offsetY, offsetZ)
+end
+
+local function resetPosition()
+    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    local randomPos = getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS)
+    rootPart.CFrame = CFrame.new(randomPos)
+end
+
+-- ==================== MAIN AUTO COUNTER + SEAT LOCK ====================
+local function startSeatSpam()
+    if seatConnection then return end
+    refreshSeatCache()
+    isSpamming = true
+
+    seatConnection = RunService.RenderStepped:Connect(function()
+        if not isSpamming then return end
+
+        if not isProperlySeated() then
+            local nearest = getNearestSeat()
+            if nearest then
+                teleportToSeat(nearest)
+            end
+            resetPosition()
+        else
+            -- We are seated → check for seat ownership and auto-eject
+            local seat = player.Character.Humanoid.SeatPart
+            if seat then
+                checkSeatOwnership(seat)
+            end
+        end
+    end)
+end
+
+local function stopSeatSpam()
+    isSpamming = false
+    if seatConnection then
+        seatConnection:Disconnect()
+        seatConnection = nil
+    end
+    currentOwner = nil
+end
+
+-- ==================== MANUAL EJECT COMMAND ====================
+player.Chatted:Connect(function(msg)
+    if msg:lower() == "/eject" and currentOwner == player then
+        local character = player.Character
+        if character and character:FindFirstChild("Humanoid") then
+            local seat = character.Humanoid.SeatPart
+            if seat then
+                ejectOccupant(seat)
+                Rayfield:Notify({Title = "Eject", Content = "Everyone ejected from your seat", Duration = 3})
+            end
+        end
+    end
+end)
+
+-- ==================== ANTI RAGDOLL ====================
+local antiRagdollEnabled = false
+local unRagdollRemote = game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("unRagdoll")
+
+RunService.Heartbeat:Connect(function()
+    if not antiRagdollEnabled then return end
+    local character = player.Character
+    if not character then return end
+    local humanoid = character:FindFirstChild("Humanoid")
+    if humanoid and (humanoid.PlatformStand or humanoid:GetState() == Enum.HumanoidStateType.Physics) then
+        unRagdollRemote:FireServer()
+        humanoid.PlatformStand = false
+    end
+end)
+
+-- ==================== CHARACTER HANDLING ====================
+local function setupCharacter(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    humanoid.Died:Connect(function()
+        task.wait(2)
+        if isSpamming then
+            stopSeatSpam()
+            task.wait(0.5)
+            startSeatSpam()
+        end
+    end)
+end
+
+if player.Character then setupCharacter(player.Character) end
+player.CharacterAdded:Connect(setupCharacter)
+
+-- ==================== NUMPAD CYCLE ====================
+local autoCycleEnabled = false
+local tapsPerSecond = 10
+local selectedKeys = {"KeypadOne","KeypadTwo","KeypadThree","KeypadFour","KeypadFive",
+                      "KeypadSix","KeypadSeven","KeypadEight","KeypadNine","KeypadZero"}
+local currentIndex = 1
+
+task.spawn(function()
+    while true do
+        if autoCycleEnabled then
+            local keyCode = Enum.KeyCode[selectedKeys[currentIndex]]
+            VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+            task.wait(0.001)
+            VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+            currentIndex = (currentIndex % #selectedKeys) + 1
+            task.wait(1 / tapsPerSecond)
+        else
+            task.wait(0.1)
+        end
+    end
+end)
+
+-- ==================== AUTO CLICKER ====================
+local autoClickerEnabled = false
+local clicksPerSecond = 12
+
+task.spawn(function()
+    while true do
+        if autoClickerEnabled then
+            VirtualInputManager:SendMouseButtonEvent(160, 0, 0, true, game, 0)
+            task.wait(0.001)
+            VirtualInputManager:SendMouseButtonEvent(160, 0, 0, false, game, 0)
+            task.wait(1 / clicksPerSecond)
+        else
+            task.wait(0.1)
+        end
+    end
+end)
+
+-- ==================== UI ====================
+MainTab:CreateToggle({
+    Name = "Auto Car Counter + Seat Lock",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value then
+            startSeatSpam()
+            Rayfield:Notify({Title = "Auto Car Counter", Content = "ENABLED - Seat is now locked to you", Duration = 5})
+        else
+            stopSeatSpam()
+            Rayfield:Notify({Title = "Auto Car Counter", Content = "DISABLED - Seat lock released", Duration = 4})
+        end
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "0-9 Numpad Cycle",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoCycleEnabled = Value
+        Rayfield:Notify({Title = "Numpad Cycle", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Numpad Speed (Taps/sec)",
+    Range = {1, 50},
+    Increment = 1,
+    CurrentValue = 10,
+    Callback = function(Value)
+        tapsPerSecond = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Anti-Ragdoll",
+    CurrentValue = false,
+    Callback = function(Value)
+        antiRagdollEnabled = Value
+        Rayfield:Notify({Title = "Anti-Ragdoll", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Clicker",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoClickerEnabled = Value
+        Rayfield:Notify({Title = "Auto Clicker", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Click Speed (Clicks/sec)",
+    Range = {1, 30},
+    Increment = 1,
+    CurrentValue = 12,
+    Callback = function(Value)
+        clicksPerSecond = Value
+    end,
+})
+
+Rayfield:Notify({
+    Title = "BUB_Scripts Loaded",
+    Content = "Auto Car Counter + Seat Lock Combined",
+    Duration = 6,
+})
+
+print("✅ BUB_Scripts loaded successfully!")
 local player = Players.LocalPlayer
 local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
 local RANDOM_RADIUS = 500
