@@ -1,10 +1,8 @@
 task.wait(2)
 
--- Cleanup old Rayfield instances to prevent lag on re-execute
+-- Cleanup old Rayfield
 for _, v in ipairs(game:GetService("CoreGui"):GetChildren()) do
-    if v.Name == "Rayfield" or v:FindFirstChild("Rayfield") then
-        v:Destroy()
-    end
+    if v.Name == "Rayfield" then v:Destroy() end
 end
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -36,7 +34,6 @@ local Window = Rayfield:CreateWindow({
 
 local MainTab = Window:CreateTab("Main", 4483362458)
 
--- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
@@ -47,12 +44,11 @@ local MAX_DISTANCE = 3000
 local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
 
 local isSpamming = false
-local seatConnection = nil
+local counterConnection = nil
 local currentOwner = nil
-
--- ==================== SEAT CACHE ====================
 local seatCache = {}
 
+-- ==================== SEAT CACHE ====================
 local function refreshSeatCache()
     seatCache = {}
     for _, obj in ipairs(workspace:GetDescendants()) do
@@ -62,57 +58,76 @@ local function refreshSeatCache()
     end
 end
 
+refreshSeatCache()
 workspace.DescendantAdded:Connect(refreshSeatCache)
 workspace.DescendantRemoving:Connect(function(obj)
     for i = #seatCache, 1, -1 do
-        if seatCache[i] == obj then
-            table.remove(seatCache, i)
-            break
-        end
+        if seatCache[i] == obj then table.remove(seatCache, i) break end
     end
 end)
 
--- ==================== HELPER FUNCTIONS ====================
+-- ==================== AUTO CAR COUNTER (Fast but lightweight) ====================
 local function isProperlySeated()
-    local character = player.Character
-    if not character then return false end
-    local humanoid = character:FindFirstChild("Humanoid")
-    return humanoid and humanoid.SeatPart and humanoid.SeatPart.Occupant == humanoid
+    local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+    return hum and hum.SeatPart and hum.SeatPart.Occupant == hum
 end
 
 local function getNearestSeat()
-    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return nil end
-
-    local closestSeat = nil
-    local shortestDistance = math.huge
-
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local closest, dist = nil, math.huge
     for _, seat in ipairs(seatCache) do
         if seat and seat.Parent and not seat.Occupant then
-            local distance = (seat.Position - rootPart.Position).Magnitude
-            if distance < shortestDistance and distance <= MAX_DISTANCE then
-                shortestDistance = distance
-                closestSeat = seat
+            local d = (seat.Position - root.Position).Magnitude
+            if d < dist and d <= MAX_DISTANCE then
+                dist, closest = d, seat
             end
         end
     end
-    return closestSeat
+    return closest
 end
 
 local function teleportToSeat(seat)
-    if not seat then return end
-    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root or not seat then return end
+    root.CFrame = seat.CFrame * TELEPORT_OFFSET
+    task.wait(0.05)
+    local hum = player.Character:FindFirstChild("Humanoid")
+    if hum and not seat.Occupant then seat:Sit(hum) end
+end
 
-    rootPart.CFrame = seat.CFrame * TELEPORT_OFFSET
-    task.wait(0.03)
-
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if humanoid and not seat.Occupant then
-        seat:Sit(humanoid)
+local function resetPosition()
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if root then
+        local angle = math.random() * math.pi * 2
+        local dist = math.random() * RANDOM_RADIUS
+        root.CFrame = CFrame.new(RESET_CENTER + Vector3.new(math.cos(angle)*dist, math.random(-25,25), math.sin(angle)*dist))
     end
 end
 
+local function startAutoCounter()
+    if counterConnection then return end
+    isSpamming = true
+
+    counterConnection = RunService.Heartbeat:Connect(function()
+        if not isSpamming then return end
+        if not isProperlySeated() then
+            local nearest = getNearestSeat()
+            if nearest then teleportToSeat(nearest) end
+            resetPosition()
+        end
+    end)
+end
+
+local function stopAutoCounter()
+    isSpamming = false
+    if counterConnection then
+        counterConnection:Disconnect()
+        counterConnection = nil
+    end
+end
+
+-- ==================== SEAT LOCK + EJECT (Separate & Efficient) ====================
 local function ejectOccupant(seat)
     if seat and seat.Occupant then
         local hum = seat.Occupant
@@ -122,115 +137,88 @@ local function ejectOccupant(seat)
     end
 end
 
-local function checkSeatOwnership(seat)
-    if not seat or not seat.Occupant then return end
-    local occupantPlayer = Players:GetPlayerFromCharacter(seat.Occupant.Parent)
-    if not occupantPlayer then return end
+-- Main efficient check using Changed signal + slow backup
+local function setupSeatLock()
+    -- Primary: Only runs when someone sits/leaves
+    for _, seat in ipairs(seatCache) do
+        seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+            if not seat.Occupant then return end
 
-    if not currentOwner and occupantPlayer == player then
-        currentOwner = player
-        Rayfield:Notify({Title = "Seat Locked", Content = "You are now the owner", Duration = 3})
-    elseif occupantPlayer ~= player and currentOwner == player then
-        Rayfield:Notify({Title = "Seat Protected", Content = occupantPlayer.Name .. " was auto-ejected", Duration = 2})
-        ejectOccupant(seat)
-    end
-end
+            local occupantPlayer = Players:GetPlayerFromCharacter(seat.Occupant.Parent)
+            if not occupantPlayer then return end
 
-local function getRandomPositionAround(center, radius)
-    local angle = math.random() * math.pi * 2
-    local distance = math.random() * radius
-    return center + Vector3.new(math.cos(angle) * distance, math.random(-25, 25), math.sin(angle) * distance)
-end
-
-local function resetPosition()
-    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        rootPart.CFrame = CFrame.new(getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS))
-    end
-end
-
--- ==================== MAIN AUTO COUNTER + SEAT LOCK (Optimized) ====================
-local function startSeatSpam()
-    if seatConnection then return end
-    refreshSeatCache()
-    isSpamming = true
-
-    seatConnection = RunService.Heartbeat:Connect(function()  -- Changed to Heartbeat (lighter than RenderStepped)
-        if not isSpamming then return end
-
-        if not isProperlySeated() then
-            local nearest = getNearestSeat()
-            if nearest then
-                teleportToSeat(nearest)
+            if not currentOwner and occupantPlayer == player then
+                currentOwner = player
+                Rayfield:Notify({Title = "Seat Locked", Content = "You are now the owner", Duration = 3})
+            elseif occupantPlayer ~= player and currentOwner == player then
+                ejectOccupant(seat)
             end
-            resetPosition()
-        else
-            local seat = player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.SeatPart
-            if seat then
-                checkSeatOwnership(seat)
+        end)
+    end
+
+    -- Backup check (only 4 times per second)
+    task.spawn(function()
+        while true do
+            if currentOwner == player then
+                for _, seat in ipairs(seatCache) do
+                    if seat.Occupant then
+                        local occupantPlayer = Players:GetPlayerFromCharacter(seat.Occupant.Parent)
+                        if occupantPlayer and occupantPlayer ~= player then
+                            ejectOccupant(seat)
+                        end
+                    end
+                end
             end
+            task.wait(0.25)  -- 4 times per second
         end
     end)
 end
 
-local function stopSeatSpam()
-    isSpamming = false
-    if seatConnection then
-        seatConnection:Disconnect()
-        seatConnection = nil
-    end
-    currentOwner = nil
-end
-
--- ==================== MANUAL EJECT ====================
+-- Manual eject
 player.Chatted:Connect(function(msg)
     if msg:lower() == "/eject" and currentOwner == player then
-        local character = player.Character
-        if character and character:FindFirstChild("Humanoid") then
-            local seat = character.Humanoid.SeatPart
-            if seat then
-                ejectOccupant(seat)
-                Rayfield:Notify({Title = "Eject", Content = "Everyone ejected from your seat", Duration = 3})
-            end
+        local seat = player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.SeatPart
+        if seat then
+            ejectOccupant(seat)
+            Rayfield:Notify({Title = "Eject", Content = "Everyone ejected from your seat", Duration = 3})
         end
     end
 end)
 
--- ==================== CHARACTER HANDLING ====================
-local function setupCharacter(character)
-    local humanoid = character:WaitForChild("Humanoid")
-    humanoid.Died:Connect(function()
-        task.wait(2)
-        if isSpamming then
-            stopSeatSpam()
-            task.wait(0.5)
-            startSeatSpam()
-        end
-    end)
-end
-
-if player.Character then setupCharacter(player.Character) end
-player.CharacterAdded:Connect(setupCharacter)
-
 -- ==================== UI ====================
 MainTab:CreateToggle({
-    Name = "Auto Car Counter + Seat Lock",
+    Name = "Auto Car Counter",
     CurrentValue = false,
     Callback = function(Value)
         if Value then
-            startSeatSpam()
-            Rayfield:Notify({Title = "Auto Car Counter", Content = "ENABLED - Seat is now locked to you", Duration = 4})
+            startAutoCounter()
+            Rayfield:Notify({Title = "Auto Counter", Content = "ENABLED", Duration = 4})
         else
-            stopSeatSpam()
-            Rayfield:Notify({Title = "Auto Car Counter", Content = "DISABLED - Seat lock released", Duration = 4})
+            stopAutoCounter()
+            Rayfield:Notify({Title = "Auto Counter", Content = "DISABLED", Duration = 4})
+        end
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Seat Lock (Owner Only)",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value then
+            currentOwner = nil  -- reset owner
+            setupSeatLock()
+            Rayfield:Notify({Title = "Seat Lock", Content = "ENABLED - Sit first to claim", Duration = 4})
+        else
+            currentOwner = nil
+            Rayfield:Notify({Title = "Seat Lock", Content = "DISABLED", Duration = 4})
         end
     end,
 })
 
 Rayfield:Notify({
     Title = "BUB_Scripts Loaded",
-    Content = "Optimized Auto Car Counter + Seat Owner System",
+    Content = "Separated Counter + Seat Lock",
     Duration = 5,
 })
 
-print("✅ BUB_Scripts loaded successfully! (Optimized)")
+print("✅ Optimized BUB_Scripts loaded - Counter and Seat Lock are now separate")
