@@ -1,10 +1,18 @@
-task.wait(3)
+task.wait(2)
+
+-- Cleanup old Rayfield instances to prevent lag on re-execute
+for _, v in ipairs(game:GetService("CoreGui"):GetChildren()) do
+    if v.Name == "Rayfield" or v:FindFirstChild("Rayfield") then
+        v:Destroy()
+    end
+end
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
     Name = "😎 BUB_Scripts",
     LoadingTitle = "BUB_Scripts",
-    LoadingSubtitle = "AutoCounter + Seat Lock + Anti-Ragdoll",
+    LoadingSubtitle = "Auto Car Counter + Seat Lock",
     Theme = "Default",
     ToggleUIKeybind = "K",
     DisableRayfieldPrompts = true,
@@ -31,7 +39,6 @@ local MainTab = Window:CreateTab("Main", 4483362458)
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
@@ -41,7 +48,7 @@ local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
 
 local isSpamming = false
 local seatConnection = nil
-local currentOwner = nil        -- Who owns the seat/vehicle
+local currentOwner = nil
 
 -- ==================== SEAT CACHE ====================
 local seatCache = {}
@@ -55,12 +62,7 @@ local function refreshSeatCache()
     end
 end
 
-workspace.DescendantAdded:Connect(function(obj)
-    if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
-        table.insert(seatCache, obj)
-    end
-end)
-
+workspace.DescendantAdded:Connect(refreshSeatCache)
 workspace.DescendantRemoving:Connect(function(obj)
     for i = #seatCache, 1, -1 do
         if seatCache[i] == obj then
@@ -75,15 +77,15 @@ local function isProperlySeated()
     local character = player.Character
     if not character then return false end
     local humanoid = character:FindFirstChild("Humanoid")
-    if not humanoid then return false end
-    return humanoid.SeatPart and humanoid.SeatPart.Occupant == humanoid
+    return humanoid and humanoid.SeatPart and humanoid.SeatPart.Occupant == humanoid
 end
 
 local function getNearestSeat()
-    local closestSeat = nil
-    local shortestDistance = math.huge
     local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return nil end
+
+    local closestSeat = nil
+    local shortestDistance = math.huge
 
     for _, seat in ipairs(seatCache) do
         if seat and seat.Parent and not seat.Occupant then
@@ -122,52 +124,38 @@ end
 
 local function checkSeatOwnership(seat)
     if not seat or not seat.Occupant then return end
+    local occupantPlayer = Players:GetPlayerFromCharacter(seat.Occupant.Parent)
+    if not occupantPlayer then return end
 
-    local occupantHum = seat.Occupant
-    local occupantPlayer = Players:GetPlayerFromCharacter(occupantHum.Parent)
-
-    if occupantPlayer then
-        -- First time sitting = become owner
-        if not currentOwner and occupantPlayer == player then
-            currentOwner = player
-            Rayfield:Notify({Title = "Seat Locked", Content = "You are now the owner", Duration = 3})
-        end
-
-        -- Someone else is in your seat → auto eject
-        if occupantPlayer ~= player and currentOwner == player then
-            Rayfield:Notify({
-                Title = "Seat Protected",
-                Content = occupantPlayer.Name .. " was auto-ejected",
-                Duration = 2.5
-            })
-            ejectOccupant(seat)
-        end
+    if not currentOwner and occupantPlayer == player then
+        currentOwner = player
+        Rayfield:Notify({Title = "Seat Locked", Content = "You are now the owner", Duration = 3})
+    elseif occupantPlayer ~= player and currentOwner == player then
+        Rayfield:Notify({Title = "Seat Protected", Content = occupantPlayer.Name .. " was auto-ejected", Duration = 2})
+        ejectOccupant(seat)
     end
 end
 
 local function getRandomPositionAround(center, radius)
     local angle = math.random() * math.pi * 2
     local distance = math.random() * radius
-    local offsetX = math.cos(angle) * distance
-    local offsetZ = math.sin(angle) * distance
-    local offsetY = math.random(-25, 25)
-    return center + Vector3.new(offsetX, offsetY, offsetZ)
+    return center + Vector3.new(math.cos(angle) * distance, math.random(-25, 25), math.sin(angle) * distance)
 end
 
 local function resetPosition()
     local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    local randomPos = getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS)
-    rootPart.CFrame = CFrame.new(randomPos)
+    if rootPart then
+        rootPart.CFrame = CFrame.new(getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS))
+    end
 end
 
--- ==================== MAIN AUTO COUNTER + SEAT LOCK ====================
+-- ==================== MAIN AUTO COUNTER + SEAT LOCK (Optimized) ====================
 local function startSeatSpam()
     if seatConnection then return end
     refreshSeatCache()
     isSpamming = true
 
-    seatConnection = RunService.RenderStepped:Connect(function()
+    seatConnection = RunService.Heartbeat:Connect(function()  -- Changed to Heartbeat (lighter than RenderStepped)
         if not isSpamming then return end
 
         if not isProperlySeated() then
@@ -177,8 +165,7 @@ local function startSeatSpam()
             end
             resetPosition()
         else
-            -- We are seated → check for seat ownership and auto-eject
-            local seat = player.Character.Humanoid.SeatPart
+            local seat = player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.SeatPart
             if seat then
                 checkSeatOwnership(seat)
             end
@@ -195,7 +182,7 @@ local function stopSeatSpam()
     currentOwner = nil
 end
 
--- ==================== MANUAL EJECT COMMAND ====================
+-- ==================== MANUAL EJECT ====================
 player.Chatted:Connect(function(msg)
     if msg:lower() == "/eject" and currentOwner == player then
         local character = player.Character
@@ -206,21 +193,6 @@ player.Chatted:Connect(function(msg)
                 Rayfield:Notify({Title = "Eject", Content = "Everyone ejected from your seat", Duration = 3})
             end
         end
-    end
-end)
-
--- ==================== ANTI RAGDOLL ====================
-local antiRagdollEnabled = false
-local unRagdollRemote = game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("unRagdoll")
-
-RunService.Heartbeat:Connect(function()
-    if not antiRagdollEnabled then return end
-    local character = player.Character
-    if not character then return end
-    local humanoid = character:FindFirstChild("Humanoid")
-    if humanoid and (humanoid.PlatformStand or humanoid:GetState() == Enum.HumanoidStateType.Physics) then
-        unRagdollRemote:FireServer()
-        humanoid.PlatformStand = false
     end
 end)
 
@@ -240,45 +212,6 @@ end
 if player.Character then setupCharacter(player.Character) end
 player.CharacterAdded:Connect(setupCharacter)
 
--- ==================== NUMPAD CYCLE ====================
-local autoCycleEnabled = false
-local tapsPerSecond = 10
-local selectedKeys = {"KeypadOne","KeypadTwo","KeypadThree","KeypadFour","KeypadFive",
-                      "KeypadSix","KeypadSeven","KeypadEight","KeypadNine","KeypadZero"}
-local currentIndex = 1
-
-task.spawn(function()
-    while true do
-        if autoCycleEnabled then
-            local keyCode = Enum.KeyCode[selectedKeys[currentIndex]]
-            VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-            task.wait(0.001)
-            VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-            currentIndex = (currentIndex % #selectedKeys) + 1
-            task.wait(1 / tapsPerSecond)
-        else
-            task.wait(0.1)
-        end
-    end
-end)
-
--- ==================== AUTO CLICKER ====================
-local autoClickerEnabled = false
-local clicksPerSecond = 12
-
-task.spawn(function()
-    while true do
-        if autoClickerEnabled then
-            VirtualInputManager:SendMouseButtonEvent(160, 0, 0, true, game, 0)
-            task.wait(0.001)
-            VirtualInputManager:SendMouseButtonEvent(160, 0, 0, false, game, 0)
-            task.wait(1 / clicksPerSecond)
-        else
-            task.wait(0.1)
-        end
-    end
-end)
-
 -- ==================== UI ====================
 MainTab:CreateToggle({
     Name = "Auto Car Counter + Seat Lock",
@@ -286,7 +219,7 @@ MainTab:CreateToggle({
     Callback = function(Value)
         if Value then
             startSeatSpam()
-            Rayfield:Notify({Title = "Auto Car Counter", Content = "ENABLED - Seat is now locked to you", Duration = 5})
+            Rayfield:Notify({Title = "Auto Car Counter", Content = "ENABLED - Seat is now locked to you", Duration = 4})
         else
             stopSeatSpam()
             Rayfield:Notify({Title = "Auto Car Counter", Content = "DISABLED - Seat lock released", Duration = 4})
@@ -294,331 +227,10 @@ MainTab:CreateToggle({
     end,
 })
 
-MainTab:CreateToggle({
-    Name = "0-9 Numpad Cycle",
-    CurrentValue = false,
-    Callback = function(Value)
-        autoCycleEnabled = Value
-        Rayfield:Notify({Title = "Numpad Cycle", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Numpad Speed (Taps/sec)",
-    Range = {1, 50},
-    Increment = 1,
-    CurrentValue = 10,
-    Callback = function(Value)
-        tapsPerSecond = Value
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Anti-Ragdoll",
-    CurrentValue = false,
-    Callback = function(Value)
-        antiRagdollEnabled = Value
-        Rayfield:Notify({Title = "Anti-Ragdoll", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Auto Clicker",
-    CurrentValue = false,
-    Callback = function(Value)
-        autoClickerEnabled = Value
-        Rayfield:Notify({Title = "Auto Clicker", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Click Speed (Clicks/sec)",
-    Range = {1, 30},
-    Increment = 1,
-    CurrentValue = 12,
-    Callback = function(Value)
-        clicksPerSecond = Value
-    end,
-})
-
 Rayfield:Notify({
     Title = "BUB_Scripts Loaded",
-    Content = "Auto Car Counter + Seat Lock Combined",
-    Duration = 6,
+    Content = "Optimized Auto Car Counter + Seat Owner System",
+    Duration = 5,
 })
 
-print("✅ BUB_Scripts loaded successfully!")
-local player = Players.LocalPlayer
-local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
-local RANDOM_RADIUS = 500
-local MAX_DISTANCE = 3000
-local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
-
-local isSpamming = false
-local seatConnection = nil
-local currentOwner = nil
-
-local loopBringEnabled = false
-local loopBringTargets = {}
-local loopBringDelay = 0.03   -- IY-style small delay for reliability
-
--- Anti-Exploiter variables
-local antiFlingEnabled = true
-local multiToolEnabled = false
-local vehicleFlyEnabled = false
-local vehicleFlySpeed = 10
-
--- ==================== SEAT CACHE & BASIC HELPERS (unchanged) ====================
-local seatCache = {}
-
-local function refreshSeatCache()
-    seatCache = {}
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
-            table.insert(seatCache, obj)
-        end
-    end
-end
-
-workspace.DescendantAdded:Connect(refreshSeatCache)
-workspace.DescendantRemoving:Connect(function(obj)
-    for i = #seatCache, 1, -1 do
-        if seatCache[i] == obj then table.remove(seatCache, i) break end
-    end
-end)
-
-local function isProperlySeated()
-    local char = player.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    return hum and hum.SeatPart and hum.SeatPart.Occupant == hum
-end
-
-local function getNearestSeat()
-    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    local closest, dist = nil, math.huge
-    for _, seat in ipairs(seatCache) do
-        if seat and seat.Parent and not seat.Occupant then
-            local d = (seat.Position - root.Position).Magnitude
-            if d < dist and d <= MAX_DISTANCE then
-                dist = d
-                closest = seat
-            end
-        end
-    end
-    return closest
-end
-
-local function teleportToSeat(seat)
-    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not root or not seat then return end
-    root.CFrame = seat.CFrame * TELEPORT_OFFSET
-    task.wait(0.03)
-    local hum = player.Character:FindFirstChild("Humanoid")
-    if hum and not seat.Occupant then seat:Sit(hum) end
-end
-
-local function ejectOccupant(seat)
-    if seat and seat.Occupant then
-        local hum = seat.Occupant
-        hum.Jump = true
-        task.wait(0.12)
-        hum.Jump = false
-    end
-end
-
-local function checkSeatOwnership(seat)
-    if not seat or not seat.Occupant then return end
-    local occupant = Players:GetPlayerFromCharacter(seat.Occupant.Parent)
-    if not occupant then return end
-
-    if not currentOwner and occupant == player then
-        currentOwner = player
-    elseif occupant ~= player and currentOwner == player then
-        ejectOccupant(seat)
-    end
-end
-
--- ==================== IY-STYLE LOOPBRING + HITBOX ====================
-local function bringPlayer(target)
-    if not target or not target.Character then return end
-    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not targetRoot or not myRoot then return end
-
-    -- Better positioning (in front + slightly above ground)
-    local frontCFrame = myRoot.CFrame * CFrame.new(0, 2, -5)
-    targetRoot.CFrame = frontCFrame
-    targetRoot.Velocity = Vector3.new(0, 0, 0)   -- Stop momentum
-end
-
--- Hitbox Expander (IY style - only on selected targets)
-local function applyHitbox(target)
-    if not target or not target.Character then return end
-    local head = target.Character:FindFirstChild("Head")
-    if head then
-        head.Size = Vector3.new(10, 10, 10)
-        head.Transparency = 0.6
-        head.CanCollide = false
-    end
-end
-
--- Main LoopBring loop (more stable than before)
-local bringLoop = nil
-local function startLoopBring()
-    if bringLoop then return end
-    bringLoop = task.spawn(function()
-        while loopBringEnabled do
-            for _, target in ipairs(loopBringTargets) do
-                bringPlayer(target)
-                if hitboxExpanderEnabled then
-                    applyHitbox(target)
-                end
-            end
-            task.wait(loopBringDelay)
-        end
-    end)
-end
-
-local function stopLoopBring()
-    loopBringEnabled = false
-    if bringLoop then
-        task.cancel(bringLoop)
-        bringLoop = nil
-    end
-end
-
--- ==================== MAIN AUTO COUNTER LOOP ====================
-local function startSeatSpam()
-    if seatConnection then return end
-    refreshSeatCache()
-    isSpamming = true
-
-    seatConnection = RunService.RenderStepped:Connect(function()
-        if not isSpamming then return end
-
-        if not isProperlySeated() then
-            local nearest = getNearestSeat()
-            if nearest then teleportToSeat(nearest) end
-            -- resetPosition() if you still want it
-        else
-            local seat = player.Character.Humanoid.SeatPart
-            if seat then checkSeatOwnership(seat) end
-        end
-    end)
-end
-
-local function stopSeatSpam()
-    isSpamming = false
-    if seatConnection then seatConnection:Disconnect() seatConnection = nil end
-    currentOwner = nil
-end
-
--- ==================== ANTI-EXPLOITER FEATURES ====================
-RunService.Heartbeat:Connect(function()
-    local char = player.Character
-    if not char then return end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    if antiFlingEnabled and root.Velocity.Magnitude > 120 then
-        root.Velocity = Vector3.new(0, root.Velocity.Y * 0.5, 0)
-        root.RotVelocity = Vector3.new(0,0,0)
-    end
-
-    if vehicleFlyEnabled then
-        local hum = char:FindFirstChild("Humanoid")
-        if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
-            local seat = hum.SeatPart
-            local dir = Vector3.new()
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += seat.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= seat.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= seat.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += seat.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0,1,0) end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0,1,0) end
-
-            seat.AssemblyLinearVelocity = dir * vehicleFlySpeed
-        end
-    end
-end)
-
--- Multi Tool
-task.spawn(function()
-    while true do
-        if multiToolEnabled then
-            local char = player.Character
-            if char then
-                for _, tool in player.Backpack:GetChildren() do
-                    if tool:IsA("Tool") then tool.Parent = char end
-                end
-            end
-        end
-        task.wait(0.4)
-    end
-end)
-
--- ==================== UI ====================
-
--- Main Tab
-MainTab:CreateToggle({
-    Name = "Auto Car Counter + Seat Lock",
-    CurrentValue = false,
-    Callback = function(v) 
-        if v then startSeatSpam() else stopSeatSpam() end 
-    end,
-})
-
--- LoopBringC Tab
-LoopBringTab:CreateToggle({
-    Name = "LoopBringC Mode (IY Style)",
-    CurrentValue = false,
-    Callback = function(v)
-        loopBringEnabled = v
-        if v then
-            startLoopBring()
-            Rayfield:Notify({Title = "LoopBringC", Content = "Enabled - Bringing selected players", Duration = 4})
-        else
-            stopLoopBring()
-            Rayfield:Notify({Title = "LoopBringC", Content = "Disabled", Duration = 3})
-        end
-    end,
-})
-
-LoopBringTab:CreateDropdown({
-    Name = "Select Players to LoopBring",
-    Options = {}, -- fill with playerOptions logic if needed
-    CurrentOption = {},
-    MultipleOptions = true,
-    Callback = function(selected)
-        loopBringTargets = {}
-        for _, name in ipairs(selected) do
-            local plr = Players:FindFirstChild(name)
-            if plr then table.insert(loopBringTargets, plr) end
-        end
-    end,
-})
-
-LoopBringTab:CreateToggle({
-    Name = "Hitbox Expander Size 10 (IY Style)",
-    CurrentValue = false,
-    Callback = function(v)
-        hitboxExpanderEnabled = v
-    end,
-})
-
--- Anti-Exploiter Tab
-AntiTab:CreateToggle({ Name = "Anti-Fling", CurrentValue = true, Callback = function(v) antiFlingEnabled = v end })
-AntiTab:CreateToggle({ Name = "Multi Tool Equip", CurrentValue = false, Callback = function(v) multiToolEnabled = v end })
-AntiTab:CreateToggle({ Name = "Vehicle Fly (vfly)", CurrentValue = false, Callback = function(v) vehicleFlyEnabled = v end })
-
-AntiTab:CreateSlider({
-    Name = "vfly Speed",
-    Range = {10, 300},
-    Increment = 5,
-    CurrentValue = 10,
-    Callback = function(v) vehicleFlySpeed = v end,
-})
-
-Rayfield:Notify({ Title = "BUB_Scripts", Content = "LoopBringC + Hitbox fixed to IY style", Duration = 6 })
-print("✅ BUB_Scripts loaded with improved LoopBringC!")
+print("✅ BUB_Scripts loaded successfully! (Optimized)")
