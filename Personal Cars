@@ -1,4 +1,5 @@
 task.wait(3)
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
@@ -32,22 +33,29 @@ local MainTab = Window:CreateTab("Main", 4483362458)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 
--- ==================== AUTO CLICKER (L Key) ====================
+-- ==================== AUTO CLICKER (L Key - Real Clicks) ====================
 local autoClickerEnabled = false
 local clickConnection = nil
 
 local function startAutoClicker()
     if clickConnection then return end
+    
     clickConnection = RunService.Heartbeat:Connect(function()
         if not autoClickerEnabled then return end
+        
         local character = player.Character
         if not character then return end
+        
         local tool = character:FindFirstChildOfClass("Tool")
         if tool then
-            tool:Activate()
+            -- Real mouse click simulation
+            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- Left click down
+            task.wait(0.008)  -- Small delay for better spam feel
+            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- Left click up
         end
     end)
 end
@@ -70,7 +78,7 @@ local function toggleAutoClicker()
     end
 end
 
--- L Key Toggle
+-- L Key Toggle (Right next to K)
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.L then
@@ -78,11 +86,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- ==================== SEAT SPAMMER (Auto Car Counter) ====================
+-- ==================== AUTO CAR COUNTER (Seat Spammer) ====================
 local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
 local RANDOM_RADIUS = 500
 local MAX_DISTANCE = 3000
 local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
+
 local isSpamming = false
 local seatConnection = nil
 local seatCache = {}
@@ -116,6 +125,7 @@ local function getNearestSeat()
     local shortestDistance = math.huge
     local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return nil end
+    
     for _, seat in ipairs(seatCache) do
         if seat and seat.Parent and not seat.Occupant then
             local distance = (seat.Position - rootPart.Position).Magnitude
@@ -178,7 +188,7 @@ local function stopSeatSpam()
     end
 end
 
--- ==================== DEATH / RESPAWN ====================
+-- ==================== DEATH / RESPAWN HANDLER ====================
 local function setupCharacter(character)
     local humanoid = character:WaitForChild("Humanoid")
     humanoid.Died:Connect(function()
@@ -232,18 +242,16 @@ MainTab:CreateSlider({
     Increment = 1,
     CurrentValue = 12,
     Callback = function(Value)
-        -- Speed slider (you can expand this later if needed)
+        -- Can be used later for dynamic speed control
     end,
 })
 
--- ==================== ADD YOUR OTHER FEATURES HERE ====================
--- Example placeholders (add your actual code for these):
-
+-- ==================== OTHER FEATURES (Add your code here) ====================
 MainTab:CreateToggle({
     Name = "Anti-Ragdoll",
     CurrentValue = false,
     Callback = function(Value)
-        -- Put your Anti-Ragdoll code here
+        -- Paste your Anti-Ragdoll code here
         Rayfield:Notify({Title = "Anti-Ragdoll", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
     end,
 })
@@ -252,25 +260,15 @@ MainTab:CreateToggle({
     Name = "0-9 Numpad Cycle",
     CurrentValue = false,
     Callback = function(Value)
-        -- Put your Numpad Cycle code here
+        -- Paste your Numpad Cycle code here
         Rayfield:Notify({Title = "Numpad Cycle", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
     end,
 })
 
-MainTab:CreateSlider({
-    Name = "Numpad Speed (Taps/sec)",
-    Range = {1, 50},
-    Increment = 1,
-    CurrentValue = 10,
-    Callback = function(Value)
-        -- Put your speed variable here
-    end,
-})
-
 Rayfield:Notify({
-    Title = "BUB_Scripts Loaded",
-    Content = "Press K for Menu | Press L for Auto Clicker",
-    Duration = 6,
+    Title = "BUB_Scripts Loaded Successfully",
+    Content = "Press K = Menu | Press L = Toggle Auto Clicker",
+    Duration = 8,
 })
 
-print("✅ BUB_Scripts fully loaded!")
+print("✅ BUB_Scripts fully loaded! | L = Auto Clicker")
