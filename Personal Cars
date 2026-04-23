@@ -1,46 +1,11 @@
-task.wait(3)
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-    Name = "😎 BUB_Scripts",
-    LoadingTitle = "BUB_Scripts",
-    LoadingSubtitle = "AutoCounter + NumKeyBindBot + Anti-Ragdoll + AutoClicker",
-    Theme = "Default",
-    ToggleUIKeybind = "K",
-    DisableRayfieldPrompts = true,
-    DisableBuildWarnings = true,
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "BUBScripts",
-        FileName = "Settings"
-    },
-    KeySystem = true,
-    KeySettings = {
-        Title = "BUB_Scripts Key System",
-        Subtitle = "Verification Required",
-        Note = "Join the Discord to get the key: https://discord.gg/J9BKhsn4",
-        FileName = "BUBScripts_Key",
-        SaveKey = false,
-        GrabKeyFromSite = true,
-        Key = "https://pastebin.com/raw/8dPafPL1"
-    }
-})
-
-local MainTab = Window:CreateTab("Main", 4483362458)
-
--- Services
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-
-local player = Players.LocalPlayer
-
--- ==================== AUTO CLICKER ====================
+-- ==================== AUTO CLICKER (L Key) - FIXED ====================
 local autoClickerEnabled = false
 local clickConnection = nil
+local VIM = game:GetService("VirtualInputManager")
 
 local function startAutoClicker()
     if clickConnection then return end
+    
     clickConnection = RunService.Heartbeat:Connect(function()
         if not autoClickerEnabled then return end
         
@@ -49,7 +14,10 @@ local function startAutoClicker()
         
         local tool = character:FindFirstChildOfClass("Tool")
         if tool then
-            tool:Activate()
+            -- Simulate real left mouse click
+            VIM:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- Mouse down
+            task.wait(0.01)                                     -- Small delay
+            VIM:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- Mouse up
         end
     end)
 end
@@ -65,68 +33,17 @@ local function toggleAutoClicker()
     autoClickerEnabled = not autoClickerEnabled
     if autoClickerEnabled then
         startAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (L)", Duration = 2})
+        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (L) - Real Click Spam", Duration = 2})
     else
         stopAutoClicker()
         Rayfield:Notify({Title = "Auto Clicker", Content = "❌ DISABLED (L)", Duration = 2})
     end
 end
 
--- L Key Toggle (Right next to K)
+-- L Key Toggle
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.L then
         toggleAutoClicker()
     end
 end)
-
--- ==================== YOUR OTHER FEATURES (unchanged) ====================
-local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
-local RANDOM_RADIUS = 500
-local MAX_DISTANCE = 3000
-local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
-local isSpamming = false
-local seatConnection = nil
-
--- [Keep all your seat cache, seat spammer, resetPosition, setupCharacter functions here...]
-
--- ==================== UI TOGGLES ====================
-MainTab:CreateToggle({
-    Name = "Auto Car Counter",
-    CurrentValue = false,
-    Callback = function(Value)
-        if Value then
-            startSeatSpam()
-        else
-            stopSeatSpam()
-        end
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Auto Clicker",
-    CurrentValue = false,
-    Callback = function(Value)
-        autoClickerEnabled = Value
-        if Value then
-            startAutoClicker()
-        else
-            stopAutoClicker()
-        end
-        Rayfield:Notify({Title = "Auto Clicker", Content = Value and "ENABLED (L)" or "DISABLED (L)", Duration = 3})
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Click Speed (Clicks/sec)",
-    Range = {1, 60},
-    Increment = 1,
-    CurrentValue = 12,
-    Callback = function(Value)
-        -- You can use this value if you want to make speed adjustable later
-    end,
-})
-
--- Rest of your toggles...
-
-print("✅ BUB_Scripts loaded | Press L to toggle Auto Clicker | Press K for UI")
