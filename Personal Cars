@@ -1,23 +1,53 @@
--- ==================== AUTO CLICKER (L Key) - FIXED ====================
+task.wait(3)
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "😎 BUB_Scripts",
+    LoadingTitle = "BUB_Scripts",
+    LoadingSubtitle = "AutoCounter + NumKeyBindBot + Anti-Ragdoll + AutoClicker",
+    Theme = "Default",
+    ToggleUIKeybind = "K",
+    DisableRayfieldPrompts = true,
+    DisableBuildWarnings = true,
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "BUBScripts",
+        FileName = "Settings"
+    },
+    KeySystem = true,
+    KeySettings = {
+        Title = "BUB_Scripts Key System",
+        Subtitle = "Verification Required",
+        Note = "Join the Discord to get the key: https://discord.gg/J9BKhsn4",
+        FileName = "BUBScripts_Key",
+        SaveKey = false,
+        GrabKeyFromSite = true,
+        Key = "https://pastebin.com/raw/8dPafPL1"
+    }
+})
+
+local MainTab = Window:CreateTab("Main", 4483362458)
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+
+-- ==================== AUTO CLICKER (L Key) ====================
 local autoClickerEnabled = false
 local clickConnection = nil
-local VIM = game:GetService("VirtualInputManager")
 
 local function startAutoClicker()
     if clickConnection then return end
-    
     clickConnection = RunService.Heartbeat:Connect(function()
         if not autoClickerEnabled then return end
-        
         local character = player.Character
         if not character then return end
-        
         local tool = character:FindFirstChildOfClass("Tool")
         if tool then
-            -- Simulate real left mouse click
-            VIM:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- Mouse down
-            task.wait(0.01)                                     -- Small delay
-            VIM:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- Mouse up
+            tool:Activate()
         end
     end)
 end
@@ -33,10 +63,10 @@ local function toggleAutoClicker()
     autoClickerEnabled = not autoClickerEnabled
     if autoClickerEnabled then
         startAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (L) - Real Click Spam", Duration = 2})
+        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (Press L)", Duration = 2})
     else
         stopAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "❌ DISABLED (L)", Duration = 2})
+        Rayfield:Notify({Title = "Auto Clicker", Content = "❌ DISABLED (Press L)", Duration = 2})
     end
 end
 
@@ -47,3 +77,200 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         toggleAutoClicker()
     end
 end)
+
+-- ==================== SEAT SPAMMER (Auto Car Counter) ====================
+local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
+local RANDOM_RADIUS = 500
+local MAX_DISTANCE = 3000
+local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
+local isSpamming = false
+local seatConnection = nil
+local seatCache = {}
+
+local function refreshSeatCache()
+    seatCache = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+            table.insert(seatCache, obj)
+        end
+    end
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+    if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
+        table.insert(seatCache, obj)
+    end
+end)
+
+workspace.DescendantRemoving:Connect(function(obj)
+    for i = #seatCache, 1, -1 do
+        if seatCache[i] == obj then
+            table.remove(seatCache, i)
+            break
+        end
+    end
+end)
+
+local function getNearestSeat()
+    local closestSeat = nil
+    local shortestDistance = math.huge
+    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+    for _, seat in ipairs(seatCache) do
+        if seat and seat.Parent and not seat.Occupant then
+            local distance = (seat.Position - rootPart.Position).Magnitude
+            if distance < shortestDistance and distance <= MAX_DISTANCE then
+                shortestDistance = distance
+                closestSeat = seat
+            end
+        end
+    end
+    return closestSeat
+end
+
+local function teleportToSeat(seat)
+    if not seat or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+    local rootPart = player.Character.HumanoidRootPart
+    rootPart.CFrame = seat.CFrame * TELEPORT_OFFSET
+    task.wait(0.03)
+    local humanoid = player.Character:FindFirstChild("Humanoid")
+    if humanoid and seat and not seat.Occupant then
+        seat:Sit(humanoid)
+    end
+end
+
+local function getRandomPositionAround(center, radius)
+    local angle = math.random() * math.pi * 2
+    local distance = math.random() * radius
+    local offsetX = math.cos(angle) * distance
+    local offsetZ = math.sin(angle) * distance
+    local offsetY = math.random(-25, 25)
+    return center + Vector3.new(offsetX, offsetY, offsetZ)
+end
+
+local function resetPosition()
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+    local rootPart = player.Character.HumanoidRootPart
+    local randomPos = getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS)
+    rootPart.CFrame = CFrame.new(randomPos)
+end
+
+local function startSeatSpam()
+    if seatConnection then return end
+    refreshSeatCache()
+    isSpamming = true
+    seatConnection = RunService.RenderStepped:Connect(function()
+        if not isSpamming then return end
+        local nearest = getNearestSeat()
+        if nearest then
+            teleportToSeat(nearest)
+        end
+        resetPosition()
+        task.wait(0.001)
+    end)
+end
+
+local function stopSeatSpam()
+    isSpamming = false
+    if seatConnection then
+        seatConnection:Disconnect()
+        seatConnection = nil
+    end
+end
+
+-- ==================== DEATH / RESPAWN ====================
+local function setupCharacter(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    humanoid.Died:Connect(function()
+        task.wait(2)
+        if isSpamming then
+            local newChar = player.Character or player.CharacterAdded:Wait()
+            setupCharacter(newChar)
+            stopSeatSpam()
+            task.wait(0.5)
+            startSeatSpam()
+            Rayfield:Notify({Title = "Auto Counter", Content = "Respawned - Restarted", Duration = 3})
+        end
+    end)
+end
+
+if player.Character then setupCharacter(player.Character) end
+player.CharacterAdded:Connect(setupCharacter)
+
+-- ==================== UI TOGGLES ====================
+MainTab:CreateToggle({
+    Name = "Auto Car Counter",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value then
+            startSeatSpam()
+            Rayfield:Notify({Title = "Auto Counter", Content = "ENABLED", Duration = 4})
+        else
+            stopSeatSpam()
+            Rayfield:Notify({Title = "Auto Counter", Content = "DISABLED", Duration = 3})
+        end
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Clicker",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoClickerEnabled = Value
+        if Value then
+            startAutoClicker()
+        else
+            stopAutoClicker()
+        end
+        Rayfield:Notify({Title = "Auto Clicker", Content = Value and "ENABLED (L)" or "DISABLED (L)", Duration = 3})
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Click Speed (Clicks/sec)",
+    Range = {1, 60},
+    Increment = 1,
+    CurrentValue = 12,
+    Callback = function(Value)
+        -- Speed slider (you can expand this later if needed)
+    end,
+})
+
+-- ==================== ADD YOUR OTHER FEATURES HERE ====================
+-- Example placeholders (add your actual code for these):
+
+MainTab:CreateToggle({
+    Name = "Anti-Ragdoll",
+    CurrentValue = false,
+    Callback = function(Value)
+        -- Put your Anti-Ragdoll code here
+        Rayfield:Notify({Title = "Anti-Ragdoll", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "0-9 Numpad Cycle",
+    CurrentValue = false,
+    Callback = function(Value)
+        -- Put your Numpad Cycle code here
+        Rayfield:Notify({Title = "Numpad Cycle", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Numpad Speed (Taps/sec)",
+    Range = {1, 50},
+    Increment = 1,
+    CurrentValue = 10,
+    Callback = function(Value)
+        -- Put your speed variable here
+    end,
+})
+
+Rayfield:Notify({
+    Title = "BUB_Scripts Loaded",
+    Content = "Press K for Menu | Press L for Auto Clicker",
+    Duration = 6,
+})
+
+print("✅ BUB_Scripts fully loaded!")
