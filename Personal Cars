@@ -37,13 +37,12 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 
--- ==================== AUTO CLICKER (L Key - Fixed) ====================
+-- ==================== AUTO CLICKER (L Key) ====================
 local autoClickerEnabled = false
 local clickConnection = nil
 
 local function startAutoClicker()
     if clickConnection then return end
-    
     clickConnection = RunService.Heartbeat:Connect(function()
         if not autoClickerEnabled then return end
         
@@ -52,9 +51,9 @@ local function startAutoClicker()
         
         local tool = character:FindFirstChildOfClass("Tool")
         if tool then
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- Click Down
-            task.wait(0.007)  -- Fast but stable
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- Click Up
+            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- Down
+            task.wait(0.007)
+            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- Up
         end
     end)
 end
@@ -70,10 +69,10 @@ local function toggleAutoClicker()
     autoClickerEnabled = not autoClickerEnabled
     if autoClickerEnabled then
         startAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (Press L)", Duration = 2})
+        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (L)", Duration = 2})
     else
         stopAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "❌ DISABLED (Press L)", Duration = 2})
+        Rayfield:Notify({Title = "Auto Clicker", Content = "❌ DISABLED (L)", Duration = 2})
     end
 end
 
@@ -85,7 +84,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- ==================== AUTO CAR COUNTER (Your Original Code) ====================
+-- ==================== AUTO CAR COUNTER ====================
 local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
 local RANDOM_RADIUS = 500
 local MAX_DISTANCE = 3000
@@ -168,7 +167,6 @@ local function startSeatSpam()
     if seatConnection then return end
     refreshSeatCache()
     isSpamming = true
-
     seatConnection = RunService.RenderStepped:Connect(function()
         if not isSpamming then return end
         local nearest = getNearestSeat()
@@ -205,7 +203,7 @@ end
 if player.Character then setupCharacter(player.Character) end
 player.CharacterAdded:Connect(setupCharacter)
 
--- ==================== UI TOGGLES ====================
+-- ==================== UI ====================
 MainTab:CreateToggle({
     Name = "Auto Car Counter",
     CurrentValue = false,
@@ -230,220 +228,8 @@ MainTab:CreateToggle({
         else
             stopAutoClicker()
         end
-        Rayfield:Notify({Title = "Auto Clicker", Content = Value and "ENABLED (L)" or "DISABLED (L)", Duration = 3})
     end,
-})
-
--- Other toggles (placeholders - replace with your real code)
-MainTab:CreateToggle({ Name = "Anti-Ragdoll", CurrentValue = false, Callback = function(v) end })
-MainTab:CreateToggle({ Name = "0-9 Numpad Cycle", CurrentValue = false, Callback = function(v) end })
-
-Rayfield:Notify({
-    Title = "BUB_Scripts Loaded",
-    Content = "K = Menu | L = Auto Clicker",
-    Duration = 8,
-})
-
-print("✅ BUB_Scripts loaded successfully!")
-local player = Players.LocalPlayer
-
--- ==================== AUTO CLICKER (L Key - Real Clicks) ====================
-local autoClickerEnabled = false
-local clickConnection = nil
-
-local function startAutoClicker()
-    if clickConnection then return end
-    
-    clickConnection = RunService.Heartbeat:Connect(function()
-        if not autoClickerEnabled then return end
-        
-        local character = player.Character
-        if not character then return end
-        
-        local tool = character:FindFirstChildOfClass("Tool")
-        if tool then
-            -- Real mouse click simulation
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- Left click down
-            task.wait(0.008)  -- Small delay for better spam feel
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- Left click up
-        end
-    end)
-end
-
-local function stopAutoClicker()
-    if clickConnection then
-        clickConnection:Disconnect()
-        clickConnection = nil
-    end
-end
-
-local function toggleAutoClicker()
-    autoClickerEnabled = not autoClickerEnabled
-    if autoClickerEnabled then
-        startAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "✅ ENABLED (Press L)", Duration = 2})
-    else
-        stopAutoClicker()
-        Rayfield:Notify({Title = "Auto Clicker", Content = "❌ DISABLED (Press L)", Duration = 2})
-    end
-end
-
--- L Key Toggle (Right next to K)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.L then
-        toggleAutoClicker()
-    end
-end)
-
--- ==================== AUTO CAR COUNTER (Seat Spammer) ====================
-local RESET_CENTER = Vector3.new(8.582, -12.629, -34.327)
-local RANDOM_RADIUS = 500
-local MAX_DISTANCE = 3000
-local TELEPORT_OFFSET = CFrame.new(0, 2, 0)
-
-local isSpamming = false
-local seatConnection = nil
-local seatCache = {}
-
-local function refreshSeatCache()
-    seatCache = {}
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
-            table.insert(seatCache, obj)
-        end
-    end
-end
-
-workspace.DescendantAdded:Connect(function(obj)
-    if obj:IsA("VehicleSeat") or obj:IsA("Seat") then
-        table.insert(seatCache, obj)
-    end
-end)
-
-workspace.DescendantRemoving:Connect(function(obj)
-    for i = #seatCache, 1, -1 do
-        if seatCache[i] == obj then
-            table.remove(seatCache, i)
-            break
-        end
-    end
-end)
-
-local function getNearestSeat()
-    local closestSeat = nil
-    local shortestDistance = math.huge
-    local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return nil end
-    
-    for _, seat in ipairs(seatCache) do
-        if seat and seat.Parent and not seat.Occupant then
-            local distance = (seat.Position - rootPart.Position).Magnitude
-            if distance < shortestDistance and distance <= MAX_DISTANCE then
-                shortestDistance = distance
-                closestSeat = seat
-            end
-        end
-    end
-    return closestSeat
-end
-
-local function teleportToSeat(seat)
-    if not seat or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-    local rootPart = player.Character.HumanoidRootPart
-    rootPart.CFrame = seat.CFrame * TELEPORT_OFFSET
-    task.wait(0.03)
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if humanoid and seat and not seat.Occupant then
-        seat:Sit(humanoid)
-    end
-end
-
-local function getRandomPositionAround(center, radius)
-    local angle = math.random() * math.pi * 2
-    local distance = math.random() * radius
-    local offsetX = math.cos(angle) * distance
-    local offsetZ = math.sin(angle) * distance
-    local offsetY = math.random(-25, 25)
-    return center + Vector3.new(offsetX, offsetY, offsetZ)
-end
-
-local function resetPosition()
-    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-    local rootPart = player.Character.HumanoidRootPart
-    local randomPos = getRandomPositionAround(RESET_CENTER, RANDOM_RADIUS)
-    rootPart.CFrame = CFrame.new(randomPos)
-end
-
-local function startSeatSpam()
-    if seatConnection then return end
-    refreshSeatCache()
-    isSpamming = true
-    seatConnection = RunService.RenderStepped:Connect(function()
-        if not isSpamming then return end
-        local nearest = getNearestSeat()
-        if nearest then
-            teleportToSeat(nearest)
-        end
-        resetPosition()
-        task.wait(0.001)
-    end)
-end
-
-local function stopSeatSpam()
-    isSpamming = false
-    if seatConnection then
-        seatConnection:Disconnect()
-        seatConnection = nil
-    end
-end
-
--- ==================== DEATH / RESPAWN HANDLER ====================
-local function setupCharacter(character)
-    local humanoid = character:WaitForChild("Humanoid")
-    humanoid.Died:Connect(function()
-        task.wait(2)
-        if isSpamming then
-            local newChar = player.Character or player.CharacterAdded:Wait()
-            setupCharacter(newChar)
-            stopSeatSpam()
-            task.wait(0.5)
-            startSeatSpam()
-            Rayfield:Notify({Title = "Auto Counter", Content = "Respawned - Restarted", Duration = 3})
-        end
-    end)
-end
-
-if player.Character then setupCharacter(player.Character) end
-player.CharacterAdded:Connect(setupCharacter)
-
--- ==================== UI TOGGLES ====================
-MainTab:CreateToggle({
-    Name = "Auto Car Counter",
-    CurrentValue = false,
-    Callback = function(Value)
-        if Value then
-            startSeatSpam()
-            Rayfield:Notify({Title = "Auto Counter", Content = "ENABLED", Duration = 4})
-        else
-            stopSeatSpam()
-            Rayfield:Notify({Title = "Auto Counter", Content = "DISABLED", Duration = 3})
-        end
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Auto Clicker",
-    CurrentValue = false,
-    Callback = function(Value)
-        autoClickerEnabled = Value
-        if Value then
-            startAutoClicker()
-        else
-            stopAutoClicker()
-        end
-        Rayfield:Notify({Title = "Auto Clicker", Content = Value and "ENABLED (L)" or "DISABLED (L)", Duration = 3})
-    end,
+    Info = "PC - L to enable/disable clicks"   -- This shows the description
 })
 
 MainTab:CreateSlider({
@@ -452,16 +238,16 @@ MainTab:CreateSlider({
     Increment = 1,
     CurrentValue = 12,
     Callback = function(Value)
-        -- Can be used later for dynamic speed control
+        -- You can connect this to control speed later if wanted
     end,
 })
 
--- ==================== OTHER FEATURES (Add your code here) ====================
+-- Other toggles
 MainTab:CreateToggle({
     Name = "Anti-Ragdoll",
     CurrentValue = false,
     Callback = function(Value)
-        -- Paste your Anti-Ragdoll code here
+        -- Your Anti-Ragdoll code here
         Rayfield:Notify({Title = "Anti-Ragdoll", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
     end,
 })
@@ -470,15 +256,15 @@ MainTab:CreateToggle({
     Name = "0-9 Numpad Cycle",
     CurrentValue = false,
     Callback = function(Value)
-        -- Paste your Numpad Cycle code here
+        -- Your Numpad code here
         Rayfield:Notify({Title = "Numpad Cycle", Content = Value and "ENABLED" or "DISABLED", Duration = 3})
     end,
 })
 
 Rayfield:Notify({
-    Title = "BUB_Scripts Loaded Successfully",
-    Content = "Press K = Menu | Press L = Toggle Auto Clicker",
+    Title = "BUB_Scripts Loaded",
+    Content = "K = Menu | L = Toggle Auto Clicker",
     Duration = 8,
 })
 
-print("✅ BUB_Scripts fully loaded! | L = Auto Clicker")
+print("✅ BUB_Scripts loaded successfully!")
